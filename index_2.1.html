@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Audio Visualizer</title>
+  <style>
+    :root {
+      --bg: #020617;
+      --text-main: #e5e7eb;
+      --text-subtle: #9ca3af;
+      --accent: #38bdf8;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 0;
+      background: radial-gradient(circle at top, #020617 0, #020617 40%, #020617 100%);
+      color: var(--text-main);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 960px;
+      margin-top: 40px;
+      padding: 20px 24px 24px;
+      background: linear-gradient(145deg, rgba(15,23,42,0.96), rgba(15,23,42,0.94));
+      border-radius: 20px;
+      border: 1px solid rgba(148,163,184,0.35);
+      box-shadow:
+        0 18px 45px rgba(0,0,0,0.75),
+        0 0 60px rgba(56,189,248,0.08);
+    }
+
+    h1 {
+      font-size: 18px;
+      margin: 0 0 12px 0;
+      font-weight: 500;
+      text-transform: uppercase;
+      color: #94a3b8;
+      letter-spacing: 0.06em;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+
+    .controls-row {
+      display: flex;
+      flex-wrap: nowrap;
+      align-items: center;
+      gap: 12px;
+    }
+
+    select {
+      background: rgba(15,23,42,0.95);
+      color: var(--text-main);
+      border-radius: 999px;
+      padding: 6px 14px;
+      font-size: 13px;
+      border: 1px solid rgba(148,163,184,0.45);
+    }
+
+    button {
+      border: none;
+      border-radius: 999px;
+      padding: 8px 18px;
+      font-size: 13px;
+      background: radial-gradient(circle at top left, #38bdf8, #2563eb);
+      color: white;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      border: 1px solid rgba(56,189,248,0.7);
+      box-shadow:
+        0 0 20px rgba(56,189,248,0.35),
+        0 12px 30px rgba(15,23,42,0.9);
+    }
+
+    /* Mode pills */
+    .mode-toggle {
+      display: flex;
+      gap: 8px;
+    }
+
+    .mode-btn {
+      padding: 6px 14px;
+      font-size: 12px;
+      text-transform: none;
+      letter-spacing: 0.04em;
+      background: rgba(15,23,42,0.95);
+      color: var(--text-subtle);
+      border-radius: 999px;
+      border: 1px solid rgba(148,163,184,0.6);
+      box-shadow: none;
+      transition: background 0.18s ease, box-shadow 0.18s ease,
+                  color 0.18s ease, border-color 0.18s ease;
+    }
+
+    .mode-btn:hover {
+      border-color: rgba(148,163,184,0.9);
+      color: #e5e7eb;
+    }
+
+    .mode-btn.active {
+      background: radial-gradient(circle at top left, #38bdf8, #2563eb);
+      color: white;
+      border-color: rgba(56,189,248,0.9);
+      box-shadow: 0 0 16px rgba(56,189,248,0.5);
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    audio {
+      width: 100%;
+      margin-top: 4px;
+      filter: drop-shadow(0 8px 16px rgba(0,0,0,0.5));
+    }
+
+    .visual-section {
+      margin-top: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .visual-block {
+      border-radius: 16px;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at top, rgba(56,189,248,0.22) 0, transparent 40%),
+        radial-gradient(circle at bottom, rgba(139,92,246,0.18) 0, transparent 42%),
+        radial-gradient(circle at center, #020617 0, #020617 60%);
+      border: 1px solid rgba(31,41,55,0.9);
+      box-shadow:
+        inset 0 0 0 1px rgba(15,23,42,0.9),
+        0 26px 60px rgba(0,0,0,0.9);
+      padding-top: 8px;
+    }
+
+    .visual-title {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-subtle);
+      opacity: 0.9;
+      padding: 0 14px 4px;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 220px;
+    }
+
+    .hint {
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--text-subtle);
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>Audio Visualizer</h1>
+
+    <div class="controls">
+      <div class="controls-row">
+        <input type="file" id="fileInput" accept="audio/*">
+        <button id="startBtn" disabled>Start Visualization</button>
+      </div>
+    <div class="controls-row mode-toggle" aria-label="Visualization mode">
+        <button class="mode-btn active" data-mode="header">Header Bars</button>
+        <button class="mode-btn" data-mode="spiral">Spiral + Heartbeat</button>
+      </div>
+    </div>
+
+    <audio id="audio" controls></audio>
+
+    <div class="visual-section">
+      <div class="visual-block" id="headerBlock">
+        <div class="visual-title">Header Bars</div>
+        <canvas id="canvasHeader"></canvas>
+      </div>
+
+      <div class="visual-block hidden" id="spiralBlock">
+        <div class="visual-title">Spiral + Heartbeat</div>
+        <canvas id="canvasSpiral"></canvas>
+      </div>
+    </div>
+
+    <div class="hint">
+      <span>Load a track, then press Start Visualization.</span>
+    </div>
+  </div>
+
+<script>
+/* ---------------- SETUP ---------------- */
+const fileInput  = document.getElementById("fileInput");
+const startBtn   = document.getElementById("startBtn");
+const audio      = document.getElementById("audio");
+
+const canvasHeader = document.getElementById("canvasHeader");
+const canvasSpiral = document.getElementById("canvasSpiral");
+const ctxHeader    = canvasHeader.getContext("2d");
+const ctxSpiral    = canvasSpiral.getContext("2d");
+
+const modeButtons = document.querySelectorAll(".mode-btn");
+const headerBlock = document.getElementById("headerBlock");
+const spiralBlock = document.getElementById("spiralBlock");
+let currentMode = "header";
+
+let audioCtx, analyser, sourceNode, dataArray, bufferLength;
+
+const N_BARS = 48;
+const ATTACK = 0.8;
+const DECAY  = 0.04;
+const GAMMA  = 0.9;
+
+let barState = new Float32Array(N_BARS);
+let prevRawBars = new Float32Array(N_BARS);
+
+let spiralPhase = 0;
+let lastTime = performance.now(); // dt reference
+
+const LOW_CUTOFF_HZ  = 40;
+const HIGH_CUTOFF_HZ = 22550;
+
+function resizeCanvases() {
+  [canvasHeader, canvasSpiral].forEach(canvas => {
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width;
+    canvas.height = rect.height;
+  });
+}
+window.addEventListener("resize", resizeCanvases);
+
+/* ---------------- MODE TOGGLING (layout only) ---------------- */
+modeButtons.forEach(btn => {
+  btn.addEventListener("click", () => {
+    const mode = btn.dataset.mode;
+    if (mode === currentMode) return;
+
+    currentMode = mode;
+
+    // active button styling
+    modeButtons.forEach(b =>
+      b.classList.toggle("active", b === btn)
+    );
+
+    // show/hide blocks
+    if (currentMode === "header") {
+      headerBlock.classList.remove("hidden");
+      spiralBlock.classList.add("hidden");
+    } else {
+      headerBlock.classList.add("hidden");
+      spiralBlock.classList.remove("hidden");
+    }
+
+    // important: recalc canvas sizes after visibility changes
+    resizeCanvases();
+  });
+});
+
+/* ---------------- FILE HANDLING ---------------- */
+fileInput.addEventListener("change", () => {
+  if (!fileInput.files[0]) return;
+  audio.src = URL.createObjectURL(fileInput.files[0]);
+  audio.load();
+  startBtn.disabled = false;
+});
+
+startBtn.addEventListener("click", async () => {
+  if (!audio.src) return;
+
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    bufferLength = analyser.frequencyBinCount;
+    dataArray = new Uint8Array(bufferLength);
+
+    sourceNode = audioCtx.createMediaElementSource(audio);
+    sourceNode.connect(analyser);
+    analyser.connect(audioCtx.destination);
+  }
+
+  await audioCtx.resume();
+  audio.play();
+
+  resizeCanvases();
+  lastTime = performance.now(); // reset when starting
+  requestAnimationFrame(draw);
+});
+
+/* ---------------- BAR PROCESSING ---------------- */
+function computeRawBars() {
+  const raw = new Float32Array(N_BARS);
+  const nyquist = audioCtx.sampleRate / 2;
+
+  let startBin = Math.floor((LOW_CUTOFF_HZ / nyquist) * bufferLength);
+  let endBin   = Math.floor((HIGH_CUTOFF_HZ / nyquist) * bufferLength);
+
+  startBin = Math.max(0, startBin);
+  endBin   = Math.min(bufferLength, endBin);
+
+  const usable = endBin - startBin;
+  const step = Math.floor(usable / N_BARS) || 1;
+
+  for (let i = 0; i < N_BARS; i++) {
+    let sum = 0, count = 0;
+    const s = startBin + i * step;
+    const e = Math.min(s + step, endBin);
+
+    for (let j = s; j < e; j++) {
+      sum += dataArray[j];
+      count++;
+    }
+
+    let v = count ? sum / count : 0;
+    v /= 255;
+    v = Math.pow(v, GAMMA);
+    raw[i] = v;
+  }
+
+  for (let i = 0; i < N_BARS; i++) {
+    const pos = i / (N_BARS - 1);
+    raw[i] *= (0.5 + 1.8 * pos * pos);
+  }
+
+  let max = Math.max(...raw, 0.001);
+  for (let i = 0; i < N_BARS; i++) raw[i] /= max;
+
+  return raw;
+}
+
+function computeTargetBars() {
+  const raw = computeRawBars();
+  const target = new Float32Array(N_BARS);
+
+  for (let i = 0; i < N_BARS; i++) {
+    const delta = Math.max(raw[i] - prevRawBars[i], 0);
+    prevRawBars[i] = raw[i];
+    let t = delta * 1.4 + raw[i] * 0.2;
+    target[i] = Math.min(t, 1);
+  }
+
+  let max = Math.max(...target, 0.001);
+  for (let i = 0; i < N_BARS; i++) target[i] /= max;
+
+  return target;
+}
+
+/* ---------------- HEADER MODE ---------------- */
+function drawRoundedRect(ctx,x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.lineTo(x+w-r,y);
+  ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r);
+  ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h);
+  ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r);
+  ctx.quadraticCurveTo(x,y,x+r,y);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawHeaderMode(ctx, canvas, bars) {
+  const width  = canvas.width;
+  const height = canvas.height;
+  const barWidth = width / N_BARS;
+
+  ctx.clearRect(0,0,width,height);
+
+  const baseHeight = height * 0.1;
+  const maxExtra   = height * 0.7;
+
+  for (let i=0;i<N_BARS;i++){
+    const v = bars[i];
+    const h = baseHeight + v * maxExtra;
+
+    const x = i * barWidth + barWidth*0.15;
+    const y = (height - h) / 2;
+
+    const pos = i/(N_BARS-1);
+    const hue = 200 + pos*110;
+
+    const grad = ctx.createLinearGradient(x,y,x,y+h);
+    grad.addColorStop(0, `hsla(${hue},80%,${60+20*v}%,1)`);
+    grad.addColorStop(1, `hsla(${hue},80%,16%,0.1)`);
+
+    ctx.shadowColor = `hsla(${hue},90%,70%,0.7)`;
+    ctx.shadowBlur = 14;
+    ctx.fillStyle = grad;
+    drawRoundedRect(ctx,x,y,barWidth*0.7,h,barWidth*0.35);
+  }
+
+  ctx.shadowBlur=0;
+}
+
+/* ---------------- SPIRAL + HEARTBEAT ---------------- */
+function drawSpiralHeartbeatMode(ctx, canvas, bars) {
+  const width = canvas.width;
+  const height = canvas.height;
+
+  ctx.clearRect(0,0,width,height);
+
+  const cx = width / 2;
+  const cy = height / 2;
+
+  const arms   = 3;
+  const turns  = 3.2;
+  const innerR = Math.min(width, height) * 0.05;
+  const outerR = Math.min(width, height) * 0.48;
+
+  // Depth layers: back → front
+  for (let layer = 0; layer < 2; layer++) {
+    const isBack = (layer === 0);
+
+    for (let i = 0; i < N_BARS; i++) {
+      const v = bars[i];
+      if (v < 0.02) continue;
+
+      const pos = i / (N_BARS - 1);
+      const baseAngle = pos * Math.PI * 2 * turns + spiralPhase;
+      const armOffset = (i % arms) * (Math.PI * 2 / arms) * 0.22;
+      const angle = baseAngle + armOffset;
+
+      let radius = innerR + pos * outerR * (0.45 + 0.55 * v);
+      if (isBack) radius *= 1.04;
+
+      const x = cx + radius * Math.cos(angle);
+      const y = cy + radius * Math.sin(angle);
+
+      const zone = pos < 0.33 ? 0 : (pos < 0.7 ? 1 : 2);
+      let hueBase = (zone === 0 ? 200 : zone === 1 ? 230 : 280);
+      const hue = hueBase + v * 15;
+      const light = 30 + pos * 40 + v * 20;
+
+      let alpha   = (isBack ? 0.10 : 0.22) + v * (isBack ? 0.3 : 0.5);
+      let dotSize = (isBack ? 2.8 : 2.0) + v * (isBack ? 7 : 5) + pos * (isBack ? 2.5 : 1.5);
+
+      ctx.beginPath();
+      ctx.fillStyle = `hsla(${hue}, 85%, ${light}%, ${alpha})`;
+      ctx.shadowColor = "transparent";
+      ctx.shadowBlur = 0;
+      ctx.arc(x, y, dotSize, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  ctx.shadowBlur = 0;
+
+  // Orbital Threads
+  const orbitCount = 3;
+  for (let o = 1; o <= orbitCount; o++) {
+    const orbitR = innerR + (outerR - innerR) * (0.28 * o);
+
+    ctx.beginPath();
+    ctx.strokeStyle = `rgba(120,160,255, ${0.12 + o * 0.04})`;
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([4, 6]);
+
+    ctx.arc(cx, cy, orbitR, 0, Math.PI * 2 * (0.92 + bars[o]*0.08));
+    ctx.stroke();
+  }
+
+  ctx.setLineDash([]);
+
+  // Core + Halo
+  ctx.save();
+  const coreRadius = Math.min(width, height) * 0.28;
+
+  const coreGrad = ctx.createRadialGradient(
+    cx, cy, 0,
+    cx, cy, coreRadius
+  );
+
+  coreGrad.addColorStop(0.0, "rgba(70, 130, 255, 0.25)");
+  coreGrad.addColorStop(0.45, "rgba(40, 80, 200, 0.18)");
+  coreGrad.addColorStop(1.0, "rgba(15, 23, 42, 0.0)");
+
+  ctx.globalCompositeOperation = "lighter";
+  ctx.fillStyle = coreGrad;
+  ctx.beginPath();
+  ctx.arc(cx, cy, coreRadius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // Heartbeat Line
+  const midY = height * 0.68;
+  const maxAmp = height * 0.42;
+
+  const pts = [];
+  for (let i=0;i<N_BARS;i++){
+    const v = bars[i];
+    const x = (i/(N_BARS-1))*width;
+    const y = midY - v*maxAmp;
+    pts.push({x,y});
+  }
+
+  ctx.save();
+  ctx.shadowColor = "rgba(0,200,255,0.9)";
+  ctx.shadowBlur = 26;
+
+  const grad = ctx.createLinearGradient(0,midY,width,midY);
+  grad.addColorStop(0, "hsla(195,100%,65%,0.15)");
+  grad.addColorStop(0.5,"hsla(190,100%,72%,1)");
+  grad.addColorStop(1, "hsla(195,100%,65%,0.15)");
+
+  ctx.strokeStyle = grad;
+  ctx.lineWidth = 4;
+  ctx.lineCap = "round";
+
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+
+  for (let i=1;i<pts.length-2;i++){
+    const xc = (pts[i].x + pts[i+1].x)/2;
+    const yc = (pts[i].y + pts[i+1].y)/2;
+    ctx.quadraticCurveTo(pts[i].x, pts[i].y, xc, yc);
+  }
+
+  ctx.quadraticCurveTo(
+    pts[pts.length-2].x,
+    pts[pts.length-2].y,
+    pts[pts.length-1].x,
+    pts[pts.length-1].y
+  );
+
+  ctx.stroke();
+  ctx.restore();
+}
+
+/* ---------------- MAIN LOOP (dt-corrected) ---------------- */
+function draw(now) {
+  const dt = (now - lastTime) / 1000; // seconds
+  lastTime = now;
+
+  analyser.getByteFrequencyData(dataArray);
+
+  const targets = computeTargetBars();
+
+  const attackRate = Math.pow(1 - ATTACK, dt * 60);
+  const decayRate  = Math.pow(1 - DECAY , dt * 60);
+
+  for (let i=0;i<N_BARS;i++){
+    barState[i] =
+      targets[i] > barState[i]
+        ? barState[i] * attackRate + targets[i] * (1 - attackRate)
+        : barState[i] * decayRate  + targets[i] * (1 - decayRate);
+  }
+
+  spiralPhase += 0.008 * (dt * 60);
+
+  drawHeaderMode(ctxHeader, canvasHeader, barState);
+  drawSpiralHeartbeatMode(ctxSpiral, canvasSpiral, barState);
+
+  requestAnimationFrame(draw);
+}
+
+resizeCanvases();
+</script>
+
+</body>
+</html>
