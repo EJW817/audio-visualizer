@@ -214,36 +214,47 @@
 
 <script>
 /* ---------------- SETUP ---------------- */
+/* Grab the UI elements */
 const fileInput  = document.getElementById("fileInput");
 const startBtn   = document.getElementById("startBtn");
 const audio      = document.getElementById("audio");
 
+/* Two canvases: bars + spiral/heartbeat */
 const canvasHeader = document.getElementById("canvasHeader");
 const canvasSpiral = document.getElementById("canvasSpiral");
 const ctxHeader    = canvasHeader.getContext("2d");
 const ctxSpiral    = canvasSpiral.getContext("2d");
 
+/* Mode toggle buttons + the two visible blocks */
 const modeButtons = document.querySelectorAll(".mode-btn");
 const headerBlock = document.getElementById("headerBlock");
 const spiralBlock = document.getElementById("spiralBlock");
 let currentMode = "header";
 
+/* Web Audio objects (AudioContext is created/resumed on Start because of autoplay policy) */
 let audioCtx, analyser, sourceNode, dataArray, bufferLength;
 
-const N_BARS = 48;
-const ATTACK = 0.8;
-const DECAY  = 0.04;
-const GAMMA  = 0.9;
+/* Main parameters */
+const N_BARS = 48;     // number of bars on screen
+const ATTACK = 0.8;    // smoothing rate for rising values
+const DECAY  = 0.04;   // smoothing rate for falling values
+const GAMMA  = 0.9;    // gamma shaping for bar values
 
-let barState = new Float32Array(N_BARS);
-let prevRawBars = new Float32Array(N_BARS);
+/* State for smoothing and transient detection */
+let barState = new Float32Array(N_BARS);    // the smoothed bar heights we draw
+let prevRawBars = new Float32Array(N_BARS); // last frame's raw bars (for delta)
 
+/* Spiral animation state */
 let spiralPhase = 0;
-let lastTime = performance.now(); // dt reference
 
+/* previous frame time (used to compute dt) */
+let lastTime = performance.now();
+
+/* Only analyze bins between 40 Hz and 22550 Hz */
 const LOW_CUTOFF_HZ  = 40;
 const HIGH_CUTOFF_HZ = 22550;
 
+/* Make canvas pixel size match its CSS size (prevents blur) */
 function resizeCanvases() {
   [canvasHeader, canvasSpiral].forEach(canvas => {
     const rect = canvas.getBoundingClientRect();
@@ -253,7 +264,8 @@ function resizeCanvases() {
 }
 window.addEventListener("resize", resizeCanvases);
 
-/* ---------------- MODE TOGGLING (layout only) ---------------- */
+/* ---------------- MODE TOGGLING (UI + canvas resize) ---------------- */
+/* Switch between the two visual blocks. Canvas stays in the DOM, just hidden. */
 modeButtons.forEach(btn => {
   btn.addEventListener("click", () => {
     const mode = btn.dataset.mode;
@@ -281,6 +293,7 @@ modeButtons.forEach(btn => {
 });
 
 /* ---------------- FILE HANDLING ---------------- */
+/* Load a local audio file into the <audio> element, then enable Start */
 fileInput.addEventListener("change", () => {
   if (!fileInput.files[0]) return;
   audio.src = URL.createObjectURL(fileInput.files[0]);
@@ -288,6 +301,7 @@ fileInput.addEventListener("change", () => {
   startBtn.disabled = false;
 });
 
+/* Create the audio graph once, then start playback + animation loop */
 startBtn.addEventListener("click", async () => {
   if (!audio.src) return;
 
@@ -295,9 +309,12 @@ startBtn.addEventListener("click", async () => {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = 2048;
+
+    // frequencyBinCount is fftSize/2
     bufferLength = analyser.frequencyBinCount;
     dataArray = new Uint8Array(bufferLength);
 
+    // connect: <audio> -> analyser -> speakers
     sourceNode = audioCtx.createMediaElementSource(audio);
     sourceNode.connect(analyser);
     analyser.connect(audioCtx.destination);
@@ -307,62 +324,74 @@ startBtn.addEventListener("click", async () => {
   audio.play();
 
   resizeCanvases();
-  lastTime = performance.now(); // reset when starting
+  lastTime = performance.now(); // reset timing when starting
   requestAnimationFrame(draw);
 });
 
 /* ---------------- BAR PROCESSING ---------------- */
+/* Convert FFT bins into 48 bars (with gamma + weighting + normalization) */
 function computeRawBars() {
   const raw = new Float32Array(N_BARS);
   const nyquist = audioCtx.sampleRate / 2;
 
+  // Map cutoff frequencies to FFT bin indices
   let startBin = Math.floor((LOW_CUTOFF_HZ / nyquist) * bufferLength);
   let endBin   = Math.floor((HIGH_CUTOFF_HZ / nyquist) * bufferLength);
 
+  // Safety: clamp to valid FFT range
   startBin = Math.max(0, startBin);
   endBin   = Math.min(bufferLength, endBin);
 
   const usable = endBin - startBin;
-  const step = Math.floor(usable / N_BARS) || 1;
+  const step = Math.floor(usable / N_BARS) || 1; // at least 1 bin per bar
 
   for (let i = 0; i < N_BARS; i++) {
     let sum = 0, count = 0;
     const s = startBin + i * step;
     const e = Math.min(s + step, endBin);
 
+    // Average a small bin range into one bar
     for (let j = s; j < e; j++) {
       sum += dataArray[j];
       count++;
     }
 
+    // normalize to 0..1, then apply gamma shaping
     let v = count ? sum / count : 0;
     v /= 255;
     v = Math.pow(v, GAMMA);
     raw[i] = v;
   }
 
+  // Quadratic weighting: push higher-frequency bars a bit more
   for (let i = 0; i < N_BARS; i++) {
     const pos = i / (N_BARS - 1);
     raw[i] *= (0.5 + 1.8 * pos * pos);
   }
 
+  // Normalize so the biggest bar becomes ~1
   let max = Math.max(...raw, 0.001);
   for (let i = 0; i < N_BARS; i++) raw[i] /= max;
 
   return raw;
 }
 
+/* Target bars = positive-only delta (attacks) + a bit of current level */
 function computeTargetBars() {
   const raw = computeRawBars();
   const target = new Float32Array(N_BARS);
 
   for (let i = 0; i < N_BARS; i++) {
+    // Only keep increases (attacks). Drops don’t count as “hits”.
     const delta = Math.max(raw[i] - prevRawBars[i], 0);
     prevRawBars[i] = raw[i];
+
+    // Mix: mostly delta + a little raw level
     let t = delta * 1.4 + raw[i] * 0.2;
     target[i] = Math.min(t, 1);
   }
 
+  // Normalize again so targets stay consistent
   let max = Math.max(...target, 0.001);
   for (let i = 0; i < N_BARS; i++) target[i] /= max;
 
@@ -370,6 +399,7 @@ function computeTargetBars() {
 }
 
 /* ---------------- HEADER MODE ---------------- */
+/* Helper for rounded bar shapes */
 function drawRoundedRect(ctx,x,y,w,h,r){
   ctx.beginPath();
   ctx.moveTo(x+r,y);
@@ -385,6 +415,7 @@ function drawRoundedRect(ctx,x,y,w,h,r){
   ctx.fill();
 }
 
+/* Draw 48 vertical bars with gradient + glow */
 function drawHeaderMode(ctx, canvas, bars) {
   const width  = canvas.width;
   const height = canvas.height;
@@ -402,6 +433,7 @@ function drawHeaderMode(ctx, canvas, bars) {
     const x = i * barWidth + barWidth*0.15;
     const y = (height - h) / 2;
 
+    // Color shifts across the bars
     const pos = i/(N_BARS-1);
     const hue = 200 + pos*110;
 
@@ -419,6 +451,7 @@ function drawHeaderMode(ctx, canvas, bars) {
 }
 
 /* ---------------- SPIRAL + HEARTBEAT ---------------- */
+/* Spiral particles + orbit rings + a heartbeat line (all driven by the same bars[]) */
 function drawSpiralHeartbeatMode(ctx, canvas, bars) {
   const width = canvas.width;
   const height = canvas.height;
@@ -433,13 +466,13 @@ function drawSpiralHeartbeatMode(ctx, canvas, bars) {
   const innerR = Math.min(width, height) * 0.05;
   const outerR = Math.min(width, height) * 0.48;
 
-  // Depth layers: back → front
+  // Two layers to fake depth (back then front)
   for (let layer = 0; layer < 2; layer++) {
     const isBack = (layer === 0);
 
     for (let i = 0; i < N_BARS; i++) {
       const v = bars[i];
-      if (v < 0.02) continue;
+      if (v < 0.02) continue; // skip tiny values to keep it cleaner
 
       const pos = i / (N_BARS - 1);
       const baseAngle = pos * Math.PI * 2 * turns + spiralPhase;
@@ -471,7 +504,7 @@ function drawSpiralHeartbeatMode(ctx, canvas, bars) {
 
   ctx.shadowBlur = 0;
 
-  // Orbital Threads
+  // Orbital rings (dashed arcs)
   const orbitCount = 3;
   for (let o = 1; o <= orbitCount; o++) {
     const orbitR = innerR + (outerR - innerR) * (0.28 * o);
@@ -481,13 +514,14 @@ function drawSpiralHeartbeatMode(ctx, canvas, bars) {
     ctx.lineWidth = 1.2;
     ctx.setLineDash([4, 6]);
 
+    // small “pulse” using bars[o]
     ctx.arc(cx, cy, orbitR, 0, Math.PI * 2 * (0.92 + bars[o]*0.08));
     ctx.stroke();
   }
 
   ctx.setLineDash([]);
 
-  // Core + Halo
+  // Core glow (lighter blend)
   ctx.save();
   const coreRadius = Math.min(width, height) * 0.28;
 
@@ -507,7 +541,7 @@ function drawSpiralHeartbeatMode(ctx, canvas, bars) {
   ctx.fill();
   ctx.restore();
 
-  // Heartbeat Line
+  // Heartbeat line (just using the bars as points)
   const midY = height * 0.68;
   const maxAmp = height * 0.42;
 
@@ -532,6 +566,7 @@ function drawSpiralHeartbeatMode(ctx, canvas, bars) {
   ctx.lineWidth = 4;
   ctx.lineCap = "round";
 
+  // Smooth curve through points (quadratic)
   ctx.beginPath();
   ctx.moveTo(pts[0].x, pts[0].y);
 
@@ -553,14 +588,17 @@ function drawSpiralHeartbeatMode(ctx, canvas, bars) {
 }
 
 /* ---------------- MAIN LOOP (dt-corrected) ---------------- */
+/* Read analyser data -> compute targets -> smooth -> draw both canvases */
 function draw(now) {
-  const dt = (now - lastTime) / 1000; // seconds
+  const dt = (now - lastTime) / 1000; // seconds since last frame
   lastTime = now;
 
+  // Fill dataArray with current frequency magnitudes
   analyser.getByteFrequencyData(dataArray);
 
   const targets = computeTargetBars();
 
+  // dt-based smoothing so motion feels the same on 60Hz / 120Hz / etc.
   const attackRate = Math.pow(1 - ATTACK, dt * 60);
   const decayRate  = Math.pow(1 - DECAY , dt * 60);
 
@@ -571,8 +609,10 @@ function draw(now) {
         : barState[i] * decayRate  + targets[i] * (1 - decayRate);
   }
 
+  // Keep spiral moving even if audio is steady
   spiralPhase += 0.008 * (dt * 60);
 
+  // Draw both; one may be hidden by CSS
   drawHeaderMode(ctxHeader, canvasHeader, barState);
   drawSpiralHeartbeatMode(ctxSpiral, canvasSpiral, barState);
 
